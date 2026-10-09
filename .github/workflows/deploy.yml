@@ -1,0 +1,127 @@
+name : Production Releas Pipeline
+
+#Trigger only main branch pushes,skipping docs/license updates
+on:
+  push:
+    branches:
+      -main
+    paths-ignore:
+      -'.gitignore'
+      -'README.md'
+      -'CONTRIBUTING.md'
+      -'LICENSE'
+      -'LICENSE.txt'
+  pullRequest:
+    branches:
+      -main
+  workFlowDispatch:
+# removing or killing any older queued runs so we only ever run the latest code
+concurrency:
+  group: deployment-tracker-${{ github.ref }}
+  cancel-in-progress: true
+#Grant permissions to write Github pages,contents and opening issues through CLI  
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  issues: write  
+jobs:
+#First phasr -> code quality checks and running test suites
+  verify-and-test:
+    name: Code quality and  Tests
+    runs-on: ubuntu-latest
+    steps:
+      -name: grab repository
+       uses: actions/checkout@v4
+
+      -name: Setup Node.js runtime
+       uses: actions/setup-node@v4
+       with:
+         node-version-file: 'node-version'
+
+      -name: Install Dependencies
+       run: npm install
+
+      -name: Runnning all project linters[cite: 12]
+       run: npm run lint:all[cite: 12]
+     
+      -name: Run unitTest
+       run: npm test
+       
+#2nd phase : Building the site for productions with the correct sub-path prefix
+
+build-prduction:
+  name: Build knowledge base
+  needs: verify and test
+  runs-on: ubuntu-latest
+  steps:
+    -name: Checkout latest files
+     uses: actions/checkout@v4
+      
+    -name: Set up Node.js env
+     uses: actions/setup-node@v4
+     with:
+       node-version-file: 'node-version'
+
+    -name: Install required dependencies
+     run: npm install
+
+    -name: Build Production Site with github pages subpath prefix[cite: 13, 14]
+       run: |
+# Extracting repo name dynamicaly to set the correct asset path prefix
+         REPO_NAME=$(echo "${{ github.repository }}" | cut -d'/'  -f2)[cite: 13, 14]
+         PATH_PREFIX="/$REPO_NAME" npm run prod[cite: 13, 14]
+
+      -name: save compiled site folder as an artifact [cite: 7]
+       uses: actions/upload-artifact@v4
+       with:
+         name: compiled-site-output
+         path: _site/[cite: 7]
+
+ # last phase : Deploy to github pages and report status via a github issue
+
+deploy:
+    name: Deploy to  Pages & open issue
+    needs: build-production[cite: 8]
+    runs-on: ubuntu-latest
+    steps:
+      -name: Download Built Site artifact[cite: 8]
+       uses: actions/download-artifact@v4
+       with:
+         name: compiled-site-output
+         path: _site/[cite: 8]
+
+      -name: Setup github pages config
+       uses: actions/configure-pages@v4
+
+      -name: Upload Artifact for static pages deployment
+       uses: actions/upload-pages-artifact@v3
+       with:
+         path: '_site/'
+
+      -name: Deploy static files to github pages [cite: 8]
+       id: deployment
+       uses: actions/deploy-pages@v4[cite: 8]
+
+      -name: open tracking issue using github cli
+       if: always()
+       env:
+         GH_TOKEN: ${{secrets.GITHUB_TOKEN }}
+       run: |
+# grab today's date and repo name
+         CURRENT_DATE=$(date +%Y-%m-%d)
+         REPO_NAME=$(echo "${{ github.repository}}" |)cut -d'/' -f2)
+         # determining status outcome and target URL
+         if [ "${{ job.status }}"== "success" ]; then 
+           STATUS_LABEL="succeeded"[cite: 7,8]
+           TARGET_URL="https://${{ github.repository_owner }}.github.io/$REPO_NAME/"[cite: 8]
+         else
+           STATUS_LABEL="failed"[cite: 7, 8]
+           TARGET_URL="Deployment failed - check workflow logs For errors"
+         fi
+         # Create the status report issue automatically
+         gh issue create \
+           --title "$CURRENT_DATE - Deployment: $STATUS_LABEL" \
+           -- body "URL: $TARGET_URL" \
+           --repo "${{ github.repository }}"[cite: 7, 8]               
+            
